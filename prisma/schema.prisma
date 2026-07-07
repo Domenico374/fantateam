@@ -1,0 +1,32 @@
+// Schema Prisma — Fantateam
+// Slice 1: Lega, Squadre, Classifica
+
+datasource db {
+  provider = "postgresql"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// Lega: competizione privata tra utenti.
+model League {
+  id        String   @id @default(cuid())
+  name      String
+  createdAt DateTime @default(now())
+
+  teams Team[]
+}
+
+// Squadra (fanta-squadra): la rosa di un utente all'interno di una Lega.
+model Team {
+  id        String   @id @default(cuid())
+  name      String
+  leagueId  String
+  points    Int      @default(0)
+  createdAt DateTime @default(now())
+
+  league League @relation(fields: [leagueId], references: [id], onDelete: Cascade)
+
+  @@index([leagueId])
+}
