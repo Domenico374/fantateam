@@ -26,7 +26,39 @@ model Team {
   points    Int      @default(0)
   createdAt DateTime @default(now())
 
-  league League @relation(fields: [leagueId], references: [id], onDelete: Cascade)
+  league League        @relation(fields: [leagueId], references: [id], onDelete: Cascade)
+  roster RosterEntry[]
 
   @@index([leagueId])
+}
+
+// Giocatore reale di Serie A (catalogo). squadraSerieA è solo una stringa con
+// il nome della squadra reale (es. "Inter"), NON una relazione verso Team:
+// Team è la fanta-squadra dell'utente, un concetto distinto.
+model Player {
+  id            String   @id @default(cuid())
+  nome          String
+  ruolo         String
+  squadraSerieA String
+  costo         Int
+  createdAt     DateTime @default(now())
+
+  rosterEntries RosterEntry[]
+
+  @@index([ruolo])
+  @@index([squadraSerieA])
+}
+
+// Rosa: collega un Player a una Team (fanta-squadra).
+model RosterEntry {
+  id        String   @id @default(cuid())
+  teamId    String
+  playerId  String
+  createdAt DateTime @default(now())
+
+  team   Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  player Player @relation(fields: [playerId], references: [id], onDelete: Restrict)
+
+  @@unique([teamId, playerId])
+  @@index([playerId])
 }

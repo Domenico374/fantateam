@@ -116,6 +116,7 @@ export default function LeagueDetailPage() {
               <th>Pos.</th>
               <th>Squadra</th>
               <th>Punti</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
@@ -124,6 +125,9 @@ export default function LeagueDetailPage() {
                 <td>{index + 1}</td>
                 <td>{team.name}</td>
                 <td>{team.points}</td>
+                <td>
+                  <Link href={`/teams/${team.id}/roster`}>Rosa</Link>
+                </td>
               </tr>
             ))}
           </tbody>
