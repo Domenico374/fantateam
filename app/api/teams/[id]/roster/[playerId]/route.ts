@@ -1,11 +1,20 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { requireTeamOwner } from "@/lib/authz";
 
 export async function DELETE(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string; playerId: string }> }
 ) {
   const { id, playerId } = await params;
+
+  const ownerResult = await requireTeamOwner(request, id);
+  if (!ownerResult.ok) {
+    return NextResponse.json(
+      { error: ownerResult.error },
+      { status: ownerResult.status }
+    );
+  }
 
   const entry = await prisma.rosterEntry.findUnique({
     where: { teamId_playerId: { teamId: id, playerId } },

@@ -1,6 +1,7 @@
-import { describe, it, expect, beforeAll, afterEach } from "vitest";
+import { describe, it, expect, beforeAll, afterEach, afterAll } from "vitest";
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { auth } from "@/lib/auth";
 import { GET as getPlayers } from "@/app/api/players/route";
 import {
   GET as getRoster,
@@ -15,20 +16,31 @@ const TEST_PREFIX = "__test__slice2__";
 const uniqueName = (label: string) =>
   `${TEST_PREFIX}${label}__${Date.now()}__${Math.random().toString(36).slice(2)}`;
 
-function makePostRequest(url: string, body: unknown) {
+function makePostRequest(url: string, body: unknown, cookie?: string) {
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  if (cookie) headers.cookie = cookie;
   return new NextRequest(url, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers,
     body: JSON.stringify(body),
   });
 }
+
+// Dalla Slice 4, Team.ownerId è obbligatorio e POST/DELETE roster richiedono
+// che chi chiama sia il proprietario. Qui non testiamo l'ownership in sé
+// (per quello c'è tests/authz.test.ts): usiamo un solo utente di test come
+// proprietario di tutte le Team create da questa suite, e il suo cookie di
+// sessione per le chiamate a postRoster/deleteRosterEntry che altrimenti
+// ricevono 401 prima di arrivare alla logica applicativa che vogliamo testare.
+let ownerUserId: string;
+let ownerCookie: string;
 
 async function createTestTeam() {
   const league = await prisma.league.create({
     data: { name: uniqueName("league") },
   });
   const team = await prisma.team.create({
-    data: { name: uniqueName("team"), leagueId: league.id },
+    data: { name: uniqueName("team"), leagueId: league.id, ownerId: ownerUserId },
   });
   return { league, team };
 }
@@ -62,6 +74,27 @@ beforeAll(async () => {
   }
   playerA = found[0];
   playerB = found[1];
+
+  const email = `${TEST_PREFIX}owner__${Date.now()}_${Math.random().toString(36).slice(2)}@example.com`;
+  const signUp = await auth.api.signUpEmail({
+    body: { name: "Test Owner Slice2", email, password: "PasswordSicura123" },
+  });
+  ownerUserId = signUp.user.id;
+
+  const { headers: signInHeaders } = await auth.api.signInEmail({
+    body: { email, password: "PasswordSicura123" },
+    returnHeaders: true,
+  });
+  ownerCookie = signInHeaders.get("set-cookie") ?? "";
+});
+
+afterAll(async () => {
+  // Le League/Team di test sono già state cancellate negli afterEach, quindi
+  // qui non c'è più nessuna Team con ownerId = ownerUserId a bloccare la
+  // cancellazione dello User (Team.ownerId ha onDelete: Restrict).
+  if (ownerUserId) {
+    await prisma.user.deleteMany({ where: { id: ownerUserId } });
+  }
 });
 
 describe("GET /api/players", () => {
@@ -149,7 +182,8 @@ describe("POST /api/teams/:id/roster", () => {
 
     const request = makePostRequest(
       `http://localhost/api/teams/${team.id}/roster`,
-      { playerId: playerA.id }
+      { playerId: playerA.id },
+      ownerCookie
     );
     const response = await postRoster(request, {
       params: Promise.resolve({ id: team.id }),
@@ -177,7 +211,8 @@ describe("POST /api/teams/:id/roster", () => {
 
     const request = makePostRequest(
       `http://localhost/api/teams/${team.id}/roster`,
-      {}
+      {},
+      ownerCookie
     );
     const response = await postRoster(request, {
       params: Promise.resolve({ id: team.id }),
@@ -189,7 +224,8 @@ describe("POST /api/teams/:id/roster", () => {
   it("ritorna 404 se la squadra non esiste", async () => {
     const request = makePostRequest(
       "http://localhost/api/teams/does-not-exist/roster",
-      { playerId: playerA.id }
+      { playerId: playerA.id },
+      ownerCookie
     );
     const response = await postRoster(request, {
       params: Promise.resolve({ id: "does-not-exist" }),
@@ -204,7 +240,8 @@ describe("POST /api/teams/:id/roster", () => {
 
     const request = makePostRequest(
       `http://localhost/api/teams/${team.id}/roster`,
-      { playerId: "does-not-exist" }
+      { playerId: "does-not-exist" },
+      ownerCookie
     );
     const response = await postRoster(request, {
       params: Promise.resolve({ id: team.id }),
@@ -219,7 +256,8 @@ describe("POST /api/teams/:id/roster", () => {
 
     const request1 = makePostRequest(
       `http://localhost/api/teams/${team.id}/roster`,
-      { playerId: playerA.id }
+      { playerId: playerA.id },
+      ownerCookie
     );
     const first = await postRoster(request1, {
       params: Promise.resolve({ id: team.id }),
@@ -228,7 +266,8 @@ describe("POST /api/teams/:id/roster", () => {
 
     const request2 = makePostRequest(
       `http://localhost/api/teams/${team.id}/roster`,
-      { playerId: playerA.id }
+      { playerId: playerA.id },
+      ownerCookie
     );
     const second = await postRoster(request2, {
       params: Promise.resolve({ id: team.id }),
@@ -257,7 +296,7 @@ describe("DELETE /api/teams/:id/roster/:playerId", () => {
     const response = await deleteRosterEntry(
       new Request(
         `http://localhost/api/teams/${team.id}/roster/${playerA.id}`,
-        { method: "DELETE" }
+        { method: "DELETE", headers: { cookie: ownerCookie } }
       ),
       { params: Promise.resolve({ id: team.id, playerId: playerA.id }) }
     );
@@ -279,7 +318,7 @@ describe("DELETE /api/teams/:id/roster/:playerId", () => {
     const response = await deleteRosterEntry(
       new Request(
         `http://localhost/api/teams/${team.id}/roster/${playerB.id}`,
-        { method: "DELETE" }
+        { method: "DELETE", headers: { cookie: ownerCookie } }
       ),
       { params: Promise.resolve({ id: team.id, playerId: playerB.id }) }
     );
@@ -291,7 +330,7 @@ describe("DELETE /api/teams/:id/roster/:playerId", () => {
     const response = await deleteRosterEntry(
       new Request(
         `http://localhost/api/teams/does-not-exist/roster/${playerA.id}`,
-        { method: "DELETE" }
+        { method: "DELETE", headers: { cookie: ownerCookie } }
       ),
       { params: Promise.resolve({ id: "does-not-exist", playerId: playerA.id }) }
     );

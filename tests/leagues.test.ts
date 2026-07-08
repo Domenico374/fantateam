@@ -1,6 +1,7 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, beforeAll, afterEach, afterAll } from "vitest";
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { auth } from "@/lib/auth";
 import { GET as getLeagues, POST as postLeague } from "@/app/api/leagues/route";
 import { GET as getLeague } from "@/app/api/leagues/[id]/route";
 import { POST as postTeam } from "@/app/api/leagues/[id]/teams/route";
@@ -11,10 +12,12 @@ const TEST_PREFIX = "__test__slice1__";
 const uniqueName = (label: string) =>
   `${TEST_PREFIX}${label}__${Date.now()}__${Math.random().toString(36).slice(2)}`;
 
-function makePostRequest(url: string, body: unknown) {
+function makePostRequest(url: string, body: unknown, cookie?: string) {
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  if (cookie) headers.cookie = cookie;
   return new NextRequest(url, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers,
     body: JSON.stringify(body),
   });
 }
@@ -30,6 +33,37 @@ afterEach(async () => {
       where: { id: { in: createdLeagueIds } },
     });
     createdLeagueIds = [];
+  }
+});
+
+// Dalla Slice 4, POST /api/leagues/:id/teams richiede una sessione (la Team
+// creata viene assegnata all'utente loggato). Creiamo un utente di test una
+// tantum per questa suite, da riusare come "chiunque sia loggato" nei test
+// che qui non riguardano l'ownership in sé (quella è testata in
+// tests/authz.test.ts), ma solo il comportamento esistente delle Slice 1.
+let ownerUserId: string;
+let ownerCookie: string;
+
+beforeAll(async () => {
+  const email = `${TEST_PREFIX}owner__${Date.now()}_${Math.random().toString(36).slice(2)}@example.com`;
+  const signUp = await auth.api.signUpEmail({
+    body: { name: "Test Owner Slice1", email, password: "PasswordSicura123" },
+  });
+  ownerUserId = signUp.user.id;
+
+  const { headers: signInHeaders } = await auth.api.signInEmail({
+    body: { email, password: "PasswordSicura123" },
+    returnHeaders: true,
+  });
+  ownerCookie = signInHeaders.get("set-cookie") ?? "";
+});
+
+afterAll(async () => {
+  // Le League/Team di test sono già state cancellate negli afterEach, quindi
+  // qui non c'è più nessuna Team con ownerId = ownerUserId a bloccare la
+  // cancellazione dello User (Team.ownerId ha onDelete: Restrict).
+  if (ownerUserId) {
+    await prisma.user.deleteMany({ where: { id: ownerUserId } });
   }
 });
 
@@ -111,13 +145,13 @@ describe("GET /api/leagues/:id", () => {
     // Creiamo le squadre in un ordine diverso da quello atteso in output,
     // cosi' il test verifica davvero l'ordinamento e non l'ordine di inserimento.
     await prisma.team.create({
-      data: { name: uniqueName("team-low"), leagueId: league.id, points: 5 },
+      data: { name: uniqueName("team-low"), leagueId: league.id, points: 5, ownerId: ownerUserId },
     });
     await prisma.team.create({
-      data: { name: uniqueName("team-high"), leagueId: league.id, points: 20 },
+      data: { name: uniqueName("team-high"), leagueId: league.id, points: 20, ownerId: ownerUserId },
     });
     await prisma.team.create({
-      data: { name: uniqueName("team-mid"), leagueId: league.id, points: 10 },
+      data: { name: uniqueName("team-mid"), leagueId: league.id, points: 10, ownerId: ownerUserId },
     });
 
     const response = await getLeague(
@@ -144,7 +178,8 @@ describe("POST /api/leagues/:id/teams", () => {
     const teamName = uniqueName("team");
     const request = makePostRequest(
       `http://localhost/api/leagues/${league.id}/teams`,
-      { name: teamName }
+      { name: teamName },
+      ownerCookie
     );
 
     const response = await postTeam(request, { params: Promise.resolve({ id: league.id }) });
@@ -168,7 +203,8 @@ describe("POST /api/leagues/:id/teams", () => {
 
     const request = makePostRequest(
       `http://localhost/api/leagues/${league.id}/teams`,
-      { name: "" }
+      { name: "" },
+      ownerCookie
     );
 
     const response = await postTeam(request, { params: Promise.resolve({ id: league.id }) });
@@ -178,7 +214,8 @@ describe("POST /api/leagues/:id/teams", () => {
   it("ritorna 404 se la lega non esiste", async () => {
     const request = makePostRequest(
       "http://localhost/api/leagues/does-not-exist/teams",
-      { name: uniqueName("team-orphan") }
+      { name: uniqueName("team-orphan") },
+      ownerCookie
     );
 
     const response = await postTeam(request, {

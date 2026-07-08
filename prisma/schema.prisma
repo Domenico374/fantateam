@@ -25,13 +25,16 @@ model Team {
   id        String   @id @default(cuid())
   name      String
   leagueId  String
+  ownerId   String
   points    Int      @default(0)
   createdAt DateTime @default(now())
 
   league League        @relation(fields: [leagueId], references: [id], onDelete: Cascade)
+  owner  User          @relation(fields: [ownerId], references: [id], onDelete: Restrict)
   roster RosterEntry[]
 
   @@index([leagueId])
+  @@index([ownerId])
 }
 
 // Giocatore reale di Serie A (catalogo). squadraSerieA è solo una stringa con
@@ -77,6 +80,7 @@ model User {
   updatedAt     DateTime  @updatedAt
   sessions      Session[]
   accounts      Account[]
+  teams         Team[]
 
   @@unique([email])
   @@map("user")

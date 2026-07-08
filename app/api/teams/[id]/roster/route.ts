@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { requireTeamOwner } from "@/lib/authz";
 
 export async function GET(
   _request: Request,
@@ -28,6 +29,14 @@ export async function POST(
 ) {
   const { id } = await params;
 
+  const ownerResult = await requireTeamOwner(request, id);
+  if (!ownerResult.ok) {
+    return NextResponse.json(
+      { error: ownerResult.error },
+      { status: ownerResult.status }
+    );
+  }
+
   const body = await request.json().catch(() => null);
   const playerId = typeof body?.playerId === "string" ? body.playerId.trim() : "";
 
@@ -36,11 +45,6 @@ export async function POST(
       { error: "playerId è obbligatorio." },
       { status: 400 }
     );
-  }
-
-  const team = await prisma.team.findUnique({ where: { id } });
-  if (!team) {
-    return NextResponse.json({ error: "Squadra non trovata." }, { status: 404 });
   }
 
   const player = await prisma.player.findUnique({ where: { id: playerId } });
