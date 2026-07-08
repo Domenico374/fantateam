@@ -1,9 +1,13 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 
-process.loadEnvFile(".env");
+// Il file .env non esiste in ambienti dove le env var arrivano già iniettate
+// (es. CI/Vercel): process.loadEnvFile lancerebbe ENOENT se chiamato a vuoto.
+if (existsSync(".env")) {
+  process.loadEnvFile(".env");
+}
 
 const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
 const prisma = new PrismaClient({ adapter });
