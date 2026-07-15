@@ -12,11 +12,17 @@ generator client {
 // Lega: competizione privata tra utenti.
 
 model League {
-  id        String   @id @default(cuid())
-  name      String
-  createdAt DateTime @default(now())
+  id         String   @id @default(cuid())
+  name       String
+  creatorId  String
+  isPrivate  Boolean  @default(false)
+  inviteCode String?  @unique
+  createdAt  DateTime @default(now())
 
-  teams Team[]
+  creator User   @relation(fields: [creatorId], references: [id], onDelete: Restrict)
+  teams   Team[]
+
+  @@index([creatorId])
 }
 
 // Squadra (fanta-squadra): la rosa di un utente all'interno di una Lega.
@@ -33,6 +39,7 @@ model Team {
   owner  User          @relation(fields: [ownerId], references: [id], onDelete: Restrict)
   roster RosterEntry[]
 
+  @@unique([leagueId, ownerId])
   @@index([leagueId])
   @@index([ownerId])
 }
@@ -71,16 +78,17 @@ model RosterEntry {
 }
 
 model User {
-  id            String    @id
-  name          String
-  email         String
-  emailVerified Boolean   @default(false)
-  image         String?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  sessions      Session[]
-  accounts      Account[]
-  teams         Team[]
+  id             String    @id
+  name           String
+  email          String
+  emailVerified  Boolean   @default(false)
+  image          String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  sessions       Session[]
+  accounts       Account[]
+  teams          Team[]
+  leaguesCreated League[]
 
   @@unique([email])
   @@map("user")

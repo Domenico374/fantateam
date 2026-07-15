@@ -83,7 +83,11 @@ beforeAll(async () => {
 
 describe("POST /api/leagues/:id/teams — ownership", () => {
   it("senza sessione ritorna 401 e non crea nessuna Team", async () => {
-    const league = await prisma.league.create({ data: { name: uniqueName("league") } });
+    const { userId: creatorId } = await creaUtenteLoggato("anon-401-creator");
+    createdUserIds.push(creatorId);
+    const league = await prisma.league.create({
+      data: { name: uniqueName("league"), creatorId },
+    });
     createdLeagueIds.push(league.id);
 
     const request = makePostRequest(
@@ -103,7 +107,9 @@ describe("POST /api/leagues/:id/teams — ownership", () => {
     const { userId, cookie } = await creaUtenteLoggato("owner-create");
     createdUserIds.push(userId);
 
-    const league = await prisma.league.create({ data: { name: uniqueName("league") } });
+    const league = await prisma.league.create({
+      data: { name: uniqueName("league"), creatorId: userId },
+    });
     createdLeagueIds.push(league.id);
 
     const teamName = uniqueName("team");
@@ -129,7 +135,9 @@ describe("POST /api/leagues/:id/teams — ownership", () => {
 
 describe("gestione rosa — proprietario, non proprietario, anonimo", () => {
   async function creaLegaSquadraDi(ownerId: string) {
-    const league = await prisma.league.create({ data: { name: uniqueName("league") } });
+    const league = await prisma.league.create({
+      data: { name: uniqueName("league"), creatorId: ownerId },
+    });
     const team = await prisma.team.create({
       data: { name: uniqueName("team"), leagueId: league.id, ownerId },
     });
@@ -276,12 +284,16 @@ describe("gestione rosa — proprietario, non proprietario, anonimo", () => {
 
 describe("GET pubbliche restano accessibili senza sessione", () => {
   it("GET /api/leagues funziona da anonimo", async () => {
-    const response = await getLeagues();
+    const response = await getLeagues(new NextRequest("http://localhost/api/leagues"));
     expect(response.status).toBe(200);
   });
 
   it("GET /api/leagues/:id funziona da anonimo", async () => {
-    const league = await prisma.league.create({ data: { name: uniqueName("league-get") } });
+    const { userId } = await creaUtenteLoggato("get-league-anon-creator");
+    createdUserIds.push(userId);
+    const league = await prisma.league.create({
+      data: { name: uniqueName("league-get"), creatorId: userId },
+    });
     createdLeagueIds.push(league.id);
 
     const response = await getLeague(new Request(`http://localhost/api/leagues/${league.id}`), {
@@ -295,7 +307,9 @@ describe("GET pubbliche restano accessibili senza sessione", () => {
   it("GET /api/teams/:id/roster funziona da anonimo", async () => {
     const { userId } = await creaUtenteLoggato("get-roster-anon");
     createdUserIds.push(userId);
-    const league = await prisma.league.create({ data: { name: uniqueName("league-get-roster") } });
+    const league = await prisma.league.create({
+      data: { name: uniqueName("league-get-roster"), creatorId: userId },
+    });
     createdLeagueIds.push(league.id);
     const team = await prisma.team.create({
       data: { name: uniqueName("team-get-roster"), leagueId: league.id, ownerId: userId },

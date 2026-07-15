@@ -8,17 +8,26 @@ type Team = {
   id: string;
   name: string;
   points: number;
+  ownerId: string;
   createdAt: string;
 };
 
 type LeagueDetail = {
   id: string;
   name: string;
+  isPrivate: boolean;
+  inviteCode?: string | null;
   createdAt: string;
   teams: Team[];
 };
 
-export default function LeagueDetailPanel({ isLoggedIn }: { isLoggedIn: boolean }) {
+export default function LeagueDetailPanel({
+  isLoggedIn,
+  currentUserId,
+}: {
+  isLoggedIn: boolean;
+  currentUserId: string | null;
+}) {
   const params = useParams<{ id: string }>();
   const leagueId = params.id;
 
@@ -87,26 +96,43 @@ export default function LeagueDetailPanel({ isLoggedIn }: { isLoggedIn: boolean 
     );
   }
 
+  const isMember =
+    currentUserId != null && league.teams.some((t) => t.ownerId === currentUserId);
+
   return (
     <main>
       <p>
         <Link href="/">← Tutte le leghe</Link>
       </p>
-      <h1>{league.name}</h1>
+      <h1>
+        {league.name} {league.isPrivate && "🔒"}
+      </h1>
+
+      {league.inviteCode && (
+        <p>
+          Codice d&apos;invito: <strong>{league.inviteCode}</strong>
+        </p>
+      )}
 
       {isLoggedIn ? (
-        <div>
-          <input
-            value={teamName}
-            onChange={(e) => setTeamName(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Nome nuova squadra"
-          />
-          <button onClick={handleAddTeam}>Aggiungi squadra</button>
-        </div>
+        isMember ? (
+          <p>Fai già parte di questa lega.</p>
+        ) : league.isPrivate ? (
+          <p>Questa lega è privata: serve un codice d&apos;invito per entrare.</p>
+        ) : (
+          <div>
+            <input
+              value={teamName}
+              onChange={(e) => setTeamName(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Nome nuova squadra"
+            />
+            <button onClick={handleAddTeam}>Aggiungi squadra</button>
+          </div>
+        )
       ) : (
         <p>
-          <Link href="/login">Fai login</Link> per aggiungere una squadra.
+          <Link href="/login">Fai login</Link> per entrare in questa lega.
         </p>
       )}
 

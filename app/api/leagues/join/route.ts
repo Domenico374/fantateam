@@ -3,12 +3,10 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/authz";
 
-// Questa route è il "join" di una lega pubblica: entrare in una lega, in
-// questo dominio, coincide con crearvi la propria squadra (vedi docs/slice-5.md).
-export async function POST(
-  request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
+// Join di una lega privata tramite codice d'invito. Un codice sbagliato non è
+// distinguibile da uno inesistente (404 in entrambi i casi): altrimenti si
+// regalerebbe un oracolo per capire quali codici "quasi" esistono.
+export async function POST(request: NextRequest) {
   const userResult = await requireUser(request);
   if (!userResult.ok) {
     return NextResponse.json(
@@ -17,35 +15,35 @@ export async function POST(
     );
   }
 
-  const { id } = await params;
-
   const body = await request.json().catch(() => null);
-  const name = typeof body?.name === "string" ? body.name.trim() : "";
+  const inviteCode =
+    typeof body?.inviteCode === "string" ? body.inviteCode.trim().toUpperCase() : "";
+  const teamName = typeof body?.teamName === "string" ? body.teamName.trim() : "";
 
-  if (!name) {
+  if (!inviteCode) {
     return NextResponse.json(
-      { error: "Il nome della squadra non può essere vuoto." },
+      { error: "Il codice d'invito è obbligatorio." },
       { status: 400 }
     );
   }
 
-  const league = await prisma.league.findUnique({ where: { id } });
+  if (!teamName) {
+    return NextResponse.json(
+      { error: "Il nome della tua squadra non può essere vuoto." },
+      { status: 400 }
+    );
+  }
+
+  const league = await prisma.league.findUnique({ where: { inviteCode } });
   if (!league) {
     return NextResponse.json(
-      { error: "Lega non trovata." },
+      { error: "Codice d'invito non valido." },
       { status: 404 }
     );
   }
 
-  if (league.isPrivate) {
-    return NextResponse.json(
-      { error: "Questa lega è privata: serve un codice d'invito per entrare." },
-      { status: 403 }
-    );
-  }
-
   const existing = await prisma.team.findUnique({
-    where: { leagueId_ownerId: { leagueId: id, ownerId: userResult.user.id } },
+    where: { leagueId_ownerId: { leagueId: league.id, ownerId: userResult.user.id } },
   });
   if (existing) {
     return NextResponse.json(
@@ -56,12 +54,10 @@ export async function POST(
 
   try {
     const team = await prisma.team.create({
-      data: { name, leagueId: id, ownerId: userResult.user.id },
+      data: { name: teamName, leagueId: league.id, ownerId: userResult.user.id },
     });
     return NextResponse.json(team, { status: 201 });
   } catch (err) {
-    // Race condition: due richieste concorrenti possono superare entrambe il
-    // check "existing" sopra e collidere sul vincolo @@unique([leagueId, ownerId]).
     if (
       err instanceof Prisma.PrismaClientKnownRequestError &&
       err.code === "P2002"

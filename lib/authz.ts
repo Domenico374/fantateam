@@ -39,6 +39,16 @@ export async function requireUser(request: Request): Promise<RequireUserResult> 
   return { ok: true, user: session.user };
 }
 
+// Come requireUser, ma non blocca mai: usato dove un endpoint resta pubblico
+// per chiunque, ma deve comportarsi diversamente se il chiamante è loggato
+// (es. includere l'inviteCode di una lega solo se il chiamante ne è il
+// creatore). Non è un controllo di autorizzazione, solo un "se sei loggato,
+// chi sei" facoltativo — l'enforcement vero resta nelle funzioni require*.
+export async function getOptionalUser(request: Request): Promise<AuthzUser | null> {
+  const session = await auth.api.getSession({ headers: request.headers });
+  return session?.user ?? null;
+}
+
 export async function requireTeamOwner(
   request: Request,
   teamId: string

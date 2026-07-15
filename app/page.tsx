@@ -13,7 +13,8 @@ export default async function HomePage() {
       <p>
         {session ? (
           <>
-            Loggato come {session.user.name} <LogoutButton />
+            Loggato come {session.user.name} <LogoutButton /> ·{" "}
+            <Link href="/leagues/mine">Le mie leghe</Link>
           </>
         ) : (
           <>
@@ -22,7 +23,7 @@ export default async function HomePage() {
         )}
       </p>
 
-      <LeaguesPanel />
+      <LeaguesPanel isLoggedIn={!!session} />
     </main>
   );
 }

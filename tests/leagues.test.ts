@@ -44,6 +44,21 @@ afterEach(async () => {
 let ownerUserId: string;
 let ownerCookie: string;
 
+// Dalla Slice 5, @@unique([leagueId, ownerId]) su Team impedisce a un utente
+// di avere più di una squadra nella stessa lega. Il test che verifica
+// l'ordinamento per punti crea 3 Team nella stessa League: servono 3
+// proprietari distinti, non più lo stesso ownerUserId ripetuto.
+let secondUserId: string;
+let thirdUserId: string;
+
+async function creaUtente(label: string) {
+  const email = `${TEST_PREFIX}${label}__${Date.now()}_${Math.random().toString(36).slice(2)}@example.com`;
+  const signUp = await auth.api.signUpEmail({
+    body: { name: `Test ${label}`, email, password: "PasswordSicura123" },
+  });
+  return signUp.user.id;
+}
+
 beforeAll(async () => {
   const email = `${TEST_PREFIX}owner__${Date.now()}_${Math.random().toString(36).slice(2)}@example.com`;
   const signUp = await auth.api.signUpEmail({
@@ -56,21 +71,36 @@ beforeAll(async () => {
     returnHeaders: true,
   });
   ownerCookie = signInHeaders.get("set-cookie") ?? "";
+
+  secondUserId = await creaUtente("second");
+  thirdUserId = await creaUtente("third");
 });
 
 afterAll(async () => {
   // Le League/Team di test sono già state cancellate negli afterEach, quindi
-  // qui non c'è più nessuna Team con ownerId = ownerUserId a bloccare la
-  // cancellazione dello User (Team.ownerId ha onDelete: Restrict).
-  if (ownerUserId) {
-    await prisma.user.deleteMany({ where: { id: ownerUserId } });
+  // qui non c'è più nessuna Team con ownerId puntato a questi User a
+  // bloccare la cancellazione (Team.ownerId ha onDelete: Restrict).
+  const ids = [ownerUserId, secondUserId, thirdUserId].filter(Boolean);
+  if (ids.length > 0) {
+    await prisma.user.deleteMany({ where: { id: { in: ids } } });
   }
 });
 
+// Dalla Slice 5, POST /api/leagues richiede login (stesso motivo di
+// POST /api/leagues/:id/teams dalla Slice 4) e il body richiede anche
+// teamName (il creatore nasce con la sua squadra). I test 400 sotto passano
+// comunque il cookie: vogliamo che falliscano per il motivo giusto (nome
+// vuoto), non solo perché anonimi (quel caso è coperto in
+// tests/league-participation.test.ts).
 describe("POST /api/leagues", () => {
   it("crea una lega e la lega esiste nel DB", async () => {
     const name = uniqueName("league");
-    const request = makePostRequest("http://localhost/api/leagues", { name });
+    const teamName = uniqueName("team");
+    const request = makePostRequest(
+      "http://localhost/api/leagues",
+      { name, teamName },
+      ownerCookie
+    );
 
     const response = await postLeague(request);
     expect(response.status).toBe(201);
@@ -86,7 +116,11 @@ describe("POST /api/leagues", () => {
   });
 
   it("rifiuta un nome vuoto con 400", async () => {
-    const request = makePostRequest("http://localhost/api/leagues", { name: "" });
+    const request = makePostRequest(
+      "http://localhost/api/leagues",
+      { name: "", teamName: uniqueName("team") },
+      ownerCookie
+    );
 
     const response = await postLeague(request);
     expect(response.status).toBe(400);
@@ -96,14 +130,22 @@ describe("POST /api/leagues", () => {
   });
 
   it("rifiuta un nome fatto solo di spazi con 400", async () => {
-    const request = makePostRequest("http://localhost/api/leagues", { name: "   " });
+    const request = makePostRequest(
+      "http://localhost/api/leagues",
+      { name: "   ", teamName: uniqueName("team") },
+      ownerCookie
+    );
 
     const response = await postLeague(request);
     expect(response.status).toBe(400);
   });
 
   it("rifiuta un body senza il campo name con 400", async () => {
-    const request = makePostRequest("http://localhost/api/leagues", {});
+    const request = makePostRequest(
+      "http://localhost/api/leagues",
+      { teamName: uniqueName("team") },
+      ownerCookie
+    );
 
     const response = await postLeague(request);
     expect(response.status).toBe(400);
@@ -113,10 +155,12 @@ describe("POST /api/leagues", () => {
 describe("GET /api/leagues", () => {
   it("include la lega appena creata nella lista", async () => {
     const name = uniqueName("league-list");
-    const created = await prisma.league.create({ data: { name } });
+    const created = await prisma.league.create({
+      data: { name, creatorId: ownerUserId },
+    });
     createdLeagueIds.push(created.id);
 
-    const response = await getLeagues();
+    const response = await getLeagues(new NextRequest("http://localhost/api/leagues"));
     expect(response.status).toBe(200);
 
     const body = await response.json();
@@ -138,20 +182,22 @@ describe("GET /api/leagues/:id", () => {
 
   it("ritorna la lega con le squadre ordinate per punti decrescenti", async () => {
     const league = await prisma.league.create({
-      data: { name: uniqueName("league-detail") },
+      data: { name: uniqueName("league-detail"), creatorId: ownerUserId },
     });
     createdLeagueIds.push(league.id);
 
     // Creiamo le squadre in un ordine diverso da quello atteso in output,
     // cosi' il test verifica davvero l'ordinamento e non l'ordine di inserimento.
+    // Tre proprietari distinti: @@unique([leagueId, ownerId]) impedirebbe a
+    // un solo utente di avere 3 squadre nella stessa lega.
     await prisma.team.create({
       data: { name: uniqueName("team-low"), leagueId: league.id, points: 5, ownerId: ownerUserId },
     });
     await prisma.team.create({
-      data: { name: uniqueName("team-high"), leagueId: league.id, points: 20, ownerId: ownerUserId },
+      data: { name: uniqueName("team-high"), leagueId: league.id, points: 20, ownerId: secondUserId },
     });
     await prisma.team.create({
-      data: { name: uniqueName("team-mid"), leagueId: league.id, points: 10, ownerId: ownerUserId },
+      data: { name: uniqueName("team-mid"), leagueId: league.id, points: 10, ownerId: thirdUserId },
     });
 
     const response = await getLeague(
@@ -171,7 +217,7 @@ describe("GET /api/leagues/:id", () => {
 describe("POST /api/leagues/:id/teams", () => {
   it("aggiunge una squadra collegata alla lega giusta", async () => {
     const league = await prisma.league.create({
-      data: { name: uniqueName("league-teams") },
+      data: { name: uniqueName("league-teams"), creatorId: ownerUserId },
     });
     createdLeagueIds.push(league.id);
 
@@ -197,7 +243,7 @@ describe("POST /api/leagues/:id/teams", () => {
 
   it("rifiuta un nome vuoto con 400", async () => {
     const league = await prisma.league.create({
-      data: { name: uniqueName("league-teams-400") },
+      data: { name: uniqueName("league-teams-400"), creatorId: ownerUserId },
     });
     createdLeagueIds.push(league.id);
 

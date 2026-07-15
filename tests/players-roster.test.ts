@@ -37,7 +37,7 @@ let ownerCookie: string;
 
 async function createTestTeam() {
   const league = await prisma.league.create({
-    data: { name: uniqueName("league") },
+    data: { name: uniqueName("league"), creatorId: ownerUserId },
   });
   const team = await prisma.team.create({
     data: { name: uniqueName("team"), leagueId: league.id, ownerId: ownerUserId },

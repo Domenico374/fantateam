@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { getOptionalUser } from "@/lib/authz";
 
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
@@ -23,5 +24,13 @@ export async function GET(
     );
   }
 
-  return NextResponse.json(league);
+  const user = await getOptionalUser(request);
+  const isCreator = user?.id === league.creatorId;
+
+  // inviteCode non va mai esposto a chi non è il creatore della lega.
+  const { inviteCode, ...rest } = league;
+  return NextResponse.json({
+    ...rest,
+    ...(isCreator ? { inviteCode } : {}),
+  });
 }
